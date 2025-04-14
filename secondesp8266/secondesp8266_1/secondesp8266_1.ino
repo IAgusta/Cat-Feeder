@@ -1,0 +1,127 @@
+#include <SoftwareSerial.h>
+#include "HX711.h"
+#include <Servo.h>
+
+const int pwmMotorA = D1;
+const int dirMotorA = D3;
+int motorSpeed = 5;
+int stopmotor = 0;
+
+//adjusting hx711
+HX711 scale;
+float units;
+const int DOUT = D6; //data pin
+const int CLK = D7; //clok pin
+const long calibration = -441000.00; //loadcell calibration
+
+//adjusting for serial connection using softwareserial.h
+const int rxpin = 3;
+const int txpin = 1;
+SoftwareSerial esp = SoftwareSerial(rxpin, txpin);
+
+//Struct data that will send to slave esp8266
+struct controlData {
+  int weight;
+  int servoRun;
+};
+struct sendData {
+  int afterRun;
+};
+controlData receivedPacket; //instance of the data structure (receive)
+sendData sendPacket;
+
+Servo myservo;
+bool servoRunStatus = false;
+
+const int redled = D2; //red pin led rgb
+const int greenled = D4; //green pin rgb
+const int blueled = D8; //blue pin rgb
+
+
+void setup() {
+  int baudrate = 115200;
+  Serial.begin(baudrate);
+  esp.begin(9600);
+  myservo.attach(D5);
+  myservo.write(0);
+ 	pinMode(pwmMotorA , OUTPUT);
+ 	pinMode(dirMotorA, OUTPUT);
+  pinMode(redled, OUTPUT);
+  pinMode(greenled, OUTPUT);
+  pinMode(blueled, OUTPUT);
+  scale.begin(DOUT, CLK);
+  scale.set_scale(calibration);
+  scale.tare();  //Reset the scale to 0 for default conditions when booting
+
+}
+
+void loop() {
+  units = scale.get_units(),10;
+    if (units < 0)
+    {
+      units = 0.00;
+    }
+  int weight = units * 1000;
+
+  if (esp.available() >= sizeof(controlData)) {
+  esp.readBytes((uint8_t*)&receivedPacket, sizeof(controlData));
+  Serial.print("Received weight : ");
+  Serial.println(receivedPacket.weight);
+  Serial.print("Servo Run Command : ");
+  Serial.println(receivedPacket.servoRun);
+
+    if (abs(weight - receivedPacket.weight) < 0.1 && receivedPacket.servoRun == 1) { // Allow small tolerance for weight comparison
+      servoRunStatus = true; // Set servo run flag
+      receivedPacket.servoRun = 0; // Reset servo run command for next cycle
+      myservo.write(0); // Stop servo (0 angle)
+      sendPacket.afterRun = receivedPacket.servoRun;
+      Serial.println("Servo stopped, sending afterRun=0 to master");
+      esp.write((uint8_t*) &sendPacket, sizeof(sendPacket)); // Send updated afterRun data to master esp
+      //led turned to green for status ready to serve the food
+      digitalWrite(redled, LOW);
+      digitalWrite(greenled, HIGH); //green led on
+      digitalWrite(blueled, LOW);
+ 	    motorRun(); //motor run to make the container drop the food
+      delay(150); //times for motor run foward (0.15 second)
+      motorStop(); //motor stop to make the bottle stay still
+      delay(5000); //give some times for food to fell down to plate
+    } else if (receivedPacket.servoRun == 1) {
+      servoRunStatus = true; // Set servo run flag
+      myservo.write(45); // Move servo to 45 degrees
+      Serial.println("Servo running at 45 degrees");
+      //led turned to yellow the status still on progress
+      digitalWrite(redled, HIGH);
+      digitalWrite(greenled, HIGH); //red + green = yellow is on
+      digitalWrite(blueled, LOW);
+    } else {
+      servoRunStatus = false; // Reset servo run flag if not triggered
+      digitalWrite(redled, HIGH); //red led on
+      digitalWrite(greenled, LOW);
+      digitalWrite(blueled, LOW);
+      motorReverse(); //reversing the motor to default location
+      delay(150); //motor run reverse for 0.15 second
+      motorStop(); //stopping motor
+      delay(1000); //give some delay so motor doesnt make any noise to loadcell
+      scale.get_tare(); //reseting loadcell value to 0 after bottle back
+    }
+  }
+}
+
+void motorRun(){
+  //activing motor A
+  Serial.println("Motor Go");
+ 	digitalWrite(pwmMotorA, motorSpeed); //running motor to ccw
+ 	digitalWrite(dirMotorA, LOW); //using digital, PWM is 1 or 255 or HIGH
+}
+
+void motorStop(){
+  digitalWrite(pwmMotorA, stopmotor); //using digital, PWM is 0 or LOW
+  Serial.println("Motor Stop");
+}
+
+void motorReverse(){
+  //send motor back
+  Serial.println("Motor Back");
+  digitalWrite(pwmMotorA, motorSpeed); //using digital, PWM is 1 or 255 or HIGH
+ 	digitalWrite(dirMotorA, HIGH); //running motor to cw
+}

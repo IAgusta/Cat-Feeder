@@ -1,0 +1,27 @@
+  if(!rfid.PICC_IsNewCardPresent()){
+    return;
+  }
+
+  if(!rfid.PICC_ReadCardSerial()){
+    return;
+  }
+
+  MFRC522::PICC_Type piccType = rfid.PICC_GetType(rfid.uid.sak);
+      for (byte i = 0; i < 4; i++) {
+       nuidPICC[i] = rfid.uid.uidByte[i];
+      }
+Serial.print(F("The NUID tag is: "));
+      printHex(rfid.uid.uidByte, rfid.uid.size);
+      Serial.println();
+      // Convert NUID to a string for Blynk (assuming 4 bytes)
+    String nuidString = "";
+    for (byte i = 0; i < 4; i++) {
+      nuidString += String(rfid.uid.uidByte[i], HEX);
+      nuidString += " ";
+    }
+    // Send NUID data to Blynk virtual pin and lcd
+    Blynk.virtualWrite(V3, nuidString);
+    lcd.setCursor(0, 0);
+    lcd.print("Cat :");
+    lcd.setCursor(5, 0);
+    lcd.print(nuidString);
